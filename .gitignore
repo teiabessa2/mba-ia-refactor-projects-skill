@@ -10,3 +10,6 @@ venv/
 # SQLite
 *.db
 instance/
+
+# Windows/WSL download artifacts
+*:Zone.Identifier
