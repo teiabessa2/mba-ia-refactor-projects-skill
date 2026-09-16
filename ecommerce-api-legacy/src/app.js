@@ -1,14 +1,30 @@
 const express = require('express');
-const AppManager = require('./AppManager');
-const { config } = require('./utils');
+const config = require('./config');
+const logger = require('./utils/logger');
+const { initDb } = require('./db/database');
+const checkoutRoutes = require('./routes/checkout.routes');
+const adminRoutes = require('./routes/admin.routes');
+const usersRoutes = require('./routes/users.routes');
+const errorHandler = require('./middlewares/errorHandler');
+
+if (!config.adminApiKey) {
+    throw new Error('ADMIN_API_KEY não configurada — defina a variável de ambiente antes de iniciar a aplicação.');
+}
 
 const app = express();
 app.use(express.json());
 
-const manager = new AppManager();
-manager.initDb();
-manager.setupRoutes(app);
+app.use(checkoutRoutes);
+app.use(adminRoutes);
+app.use(usersRoutes);
 
-app.listen(config.port, () => {
-    console.log(`Frankenstein LMS rodando na porta ${config.port}...`);
-});
+app.use(errorHandler);
+
+async function start() {
+    await initDb();
+    app.listen(config.port, () => {
+        logger.info(`Frankenstein LMS rodando na porta ${config.port}...`);
+    });
+}
+
+start();

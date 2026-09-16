@@ -24,8 +24,10 @@ Content-Type: application/json
   "card": "5111222233334444"
 }
 
-### Relatório financeiro administrativo
-GET {{baseUrl}}/api/admin/financial-report
+### Relatório financeiro administrativo (requer x-admin-api-key)
+GET {{baseUrl}}/api/admin/financial-report?page=1&size=20
+x-admin-api-key: dev-only-admin-key-change-me
 
-### Deletar usuário
+### Deletar usuário (requer x-admin-api-key)
 DELETE {{baseUrl}}/api/users/1
+x-admin-api-key: dev-only-admin-key-change-me

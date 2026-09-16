@@ -557,17 +557,17 @@ Isso não ficou só na teoria: o scanner `scan_signals.sh` foi testado de fato c
 
 ## Resultados
 
-**Status atual: Projeto 1 concluído (Análise → Auditoria → confirmação explícita → Refatoração → validação com a aplicação rodando de verdade). Projetos 2 e 3 ainda pendentes de execução.** Relatório completo do Projeto 1 em `reports/audit-project-1.md`; `reports/audit-project-2.md` e `audit-project-3.md` serão adicionados quando os respectivos projetos forem refatorados.
+**Status atual: Projetos 1 e 2 concluídos (Análise → Auditoria → confirmação explícita → Refatoração → validação com a aplicação rodando de verdade). Projeto 3 ainda pendente de execução.** Relatórios completos em `reports/audit-project-1.md` e `reports/audit-project-2.md`; `audit-project-3.md` será adicionado quando o projeto 3 for refatorado.
 
 ### Resumo dos relatórios de auditoria
 
 | Projeto | Stack | CRITICAL | HIGH | MEDIUM | LOW | Total |
 |---|---|---|---|---|---|---|
 | 1 — code-smells-project | Python/Flask | 6 | 6 | 2 | 2 | **16** |
-| 2 — ecommerce-api-legacy | Node.js/Express | — | — | — | — | *pendente* |
+| 2 — ecommerce-api-legacy | Node.js/Express | 4 | 4 | 2 | 2 | **12** |
 | 3 — task-manager-api | Python/Flask (parcialmente organizado) | — | — | — | — | *pendente* |
 
-O relatório do Projeto 1 verificou explicitamente a detecção de APIs deprecated (H2): nenhuma ocorrência encontrada — as duas dependências (`flask==3.1.1`, `flask-cors==5.0.1`) estão atuais.
+O relatório do Projeto 1 verificou explicitamente a detecção de APIs deprecated (H2): nenhuma ocorrência encontrada — as duas dependências (`flask==3.1.1`, `flask-cors==5.0.1`) estão atuais. O relatório do Projeto 2 também verificou H2: nenhuma API deprecated em uso (`express@4.18.2`, `sqlite3@5.1.6`).
 
 ### Comparação antes/depois da estrutura
 
@@ -591,17 +591,16 @@ Monolito de 4 arquivos → split completo por domínio em 5 camadas (routes/cont
 Antes                          Depois
 src/app.js                     src/app.js (entrypoint enxuto)
 src/AppManager.js (God Class:  src/config/index.js
-  DB + rotas + pagamento +     src/db/connection.js
+  DB + rotas + pagamento +     src/db/database.js (sqlite3 promisificado)
   auditoria + cache)           src/models/{users,courses,enrollments,payments,
-src/utils.js (config + cache          auditLogs,financialReport}.model.js
-  + crypto falsa)              src/services/{checkout,financialReport,
-                                       users,cache}.service.js
-                                src/controllers/{checkout,financialReport,
-                                       users}.controller.js
+src/utils.js (config + cache          auditLogs,reports}.model.js
+  + crypto falsa)              src/services/{checkout,reports,users}.service.js
+                                src/controllers/{checkout,admin,users}.controller.js
                                 src/routes/{checkout,admin,users}.routes.js
-                                src/middleware/{requireAdmin,errorHandler}.js
+                                src/middlewares/{adminAuth,errorHandler}.js
+                                src/utils/{logger,errors}.js
 ```
-God Class de 142 linhas → 20 arquivos MVC; o relatório financeiro passou de um fan-out de callbacks aninhados para uma única query com `JOIN`.
+God Class de 142 linhas (2 arquivos) → 19 arquivos MVC; o relatório financeiro passou de um fan-out de callbacks aninhados com contadores manuais (H6) para uma única query com `JOIN` (H5) — a correção de H5 eliminou H6 como efeito colateral, já que não sobrou nenhum fan-out assíncrono para causar a condição de corrida.
 
 **Projeto 3 — task-manager-api**
 ```
@@ -642,8 +641,8 @@ Este projeto **já tinha** `models/routes/services/utils` — a mudança não fo
 | [x] Linguagem correta (JavaScript/Node) | [x] Segue template | [x] Estrutura MVC |
 | [x] Framework correto (Express 4.18.2) | [x] Arquivo+linha exatos | [x] Config centralizada (`dotenv`) |
 | [x] Domínio correto (LMS/checkout) | [x] Ordenado por severidade | [x] Models abstraem dados |
-| [x] Nº de arquivos condiz (3) | [x] 11 ≥ 5 findings | [x] Routes separadas (`express.Router()`) |
-| | [x] Deprecated verificado (não aplicável) | [x] Controllers concentram fluxo |
+| [x] Nº de arquivos condiz (3) | [x] 12 ≥ 5 findings | [x] Routes separadas (`express.Router()`) |
+| | [x] Deprecated verificado (nenhuma ocorrência) | [x] Controllers concentram fluxo |
 | | [x] Pausou para confirmação | [x] Error handling centralizado (middleware 4-arg) |
 | | | [x] Entry point claro |
 | | | [x] App inicia sem erro |
@@ -682,11 +681,27 @@ $ curl -X POST http://localhost:5000/admin/reset-db -H "Authorization: Bearer ey
 
 **Projeto 2:**
 ```
-[2026-09-15T19:32:43.907Z] INFO: Frankenstein LMS rodando na porta 3000...
+{"level":30,"time":1789593088798,"pid":246685,"hostname":"...","msg":"Frankenstein LMS rodando na porta 3000..."}
 
-$ curl http://localhost:3000/api/admin/financial-report -H "X-Admin-Key: dev-admin-key"
-{"data":[{"course":"Clean Architecture","revenue":997,"students":[...]},
-         {"course":"Docker","revenue":497,"students":[...]}],"page":1,"pageSize":20,"total":2}
+$ curl -X POST http://localhost:3000/api/checkout -H "Content-Type: application/json" \
+  -d '{"usr":"Guilherme","eml":"gui@fullcycle.com.br","pwd":"senhaforte","c_id":2,"card":"4111222233334444"}'
+{"msg":"Sucesso","enrollment_id":2}
+
+$ curl http://localhost:3000/api/admin/financial-report        # sem x-admin-api-key
+→ 401 Não autorizado
+
+$ curl http://localhost:3000/api/admin/financial-report -H "x-admin-api-key: dev-only-admin-key-change-me"
+{"report":[{"course":"Clean Architecture","revenue":997,"students":[{"student":"Leonan","paid":997}]},
+           {"course":"Docker","revenue":497,"students":[{"student":"Guilherme","paid":497}]}],
+ "page":1,"size":20,"total":2}
+
+$ curl -X DELETE http://localhost:3000/api/users/1 -H "x-admin-api-key: dev-only-admin-key-change-me"
+→ 204 No Content
+
+$ curl http://localhost:3000/api/admin/financial-report -H "x-admin-api-key: dev-only-admin-key-change-me"
+{"report":[{"course":"Clean Architecture","revenue":0,"students":[]},   # matrícula/pagamento do user 1 removidos em cascata, sem lixo órfão
+           {"course":"Docker","revenue":497,"students":[{"student":"Guilherme","paid":497}]}],
+ "page":1,"size":20,"total":2}
 ```
 
 **Projeto 3:**
@@ -720,7 +735,8 @@ $ curl -X POST http://localhost:5000/login -d '{"email":"joao@email.com","passwo
   | 1 — code-smells-project | `SECRET_KEY` | Sim | App não sobe (`RuntimeError` explicando como gerar a chave) |
   | 1 — code-smells-project | `JWT_EXP_HOURS` | Não (default `8`) | — |
   | 1 — code-smells-project | `FLASK_DEBUG` | Não (default `false`) | — |
-  | 2 — ecommerce-api-legacy | `ADMIN_API_KEY` | Não | `/api/admin/*` e `DELETE /api/users/:id` bloqueados (503) |
+  | 2 — ecommerce-api-legacy | `ADMIN_API_KEY` | Sim | App não sobe (`throw` explícito no `app.js` antes de iniciar o servidor) |
+  | 2 — ecommerce-api-legacy | `PAYMENT_GATEWAY_KEY` | Não | Fluxo de checkout segue funcionando (chave mockada, nunca logada) |
   | 3 — task-manager-api | `SECRET_KEY` | Sim | App não sobe (`KeyError`) |
   | 3 — task-manager-api | `FLASK_DEBUG` | Não (default `false`) | — |
   | 3 — task-manager-api | `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASSWORD` | Não | Notificação por e-mail não é enviada, apenas logada como aviso |
