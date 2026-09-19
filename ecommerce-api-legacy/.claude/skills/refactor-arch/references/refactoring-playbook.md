@@ -15,6 +15,7 @@ Table of contents:
 - MEDIUM: [#12](#12-centralize-validation-or-business-rules-into-one-reusable-definition-fixes-m1) Centralize validation/logic (M1) · [#13](#13-catch-specific-exceptions-and-log-before-responding-fixes-m2) Log specific exceptions (M2) · [#14](#14-flatten-callback-hell-with-asyncawait-fixes-m3) Flatten callback hell (M3) · [#18](#18-strip-sensitive-fields-before-serialization-fixes-m4) Strip sensitive fields (M4)
 - LOW: [#15](#15-add-pagination-to-list-endpoints-fixes-l1) Add pagination (L1) · [#16](#16-replace-ad-hoc-prints-with-structured-logging-fixes-l2) Structured logging (L2)
 - ARCHITECTURE (complete the MVC split, not tied to one severity): [#19](#19-extract-route-registration-into-routerblueprint-modules-completes-h3--mvc-layout) Router/Blueprint extraction · [#20](#20-centralize-error-handling-in-one-framework-level-handler-extends-m2) Centralized error handler
+- CRITICAL (companion to C6, applies even when route-level auth exists): [#21](#21-add-field-level-authorization-for-sensitive-attributes-in-partial-updates) Field-level authorization for sensitive attributes
 
 ---
 
@@ -740,3 +741,87 @@ Keep any `try/except`/`catch` that reacts *differently* to a specific
 exception type (e.g. a duplicate-key error returning 409 instead of 500) —
 centralizing removes the repeated generic catch-all, not deliberate,
 type-specific error handling.
+
+---
+
+## 21. Add field-level authorization for sensitive attributes in partial updates
+
+When an endpoint accepts a partial update (PATCH/PUT) and the payload can
+touch one or more sensitive fields — `role`, `permissions`, `is_admin`,
+`balance`, a payment/subscription status, etc. — route-level checks like
+"the caller is authenticated" or even "the caller owns this resource" are
+**not sufficient**. Those checks answer "can this caller touch this
+resource at all", not "can this caller set this specific field". Add an
+explicit check for the sensitive field(s), applied before the change is
+persisted, that runs regardless of whatever route-level auth is already in
+place. This is a companion to playbook #17/catalog C6: #17 fixes a route
+with *no* auth check at all, this pattern fixes a route that has auth but
+still lets an authorized caller escalate privilege through an
+under-guarded field.
+
+A decorator like `admin_required` is usually built for gating an entire
+route, so it often doesn't fit cleanly onto a handler that must allow
+*some* fields through for any authenticated/owning caller and only gate
+one or two fields. Prefer an inline check next to (or inside) the update
+logic over trying to force the whole route behind an all-or-nothing
+decorator.
+
+**Before (Flask):**
+```python
+@app.route("/users/<int:user_id>", methods=["PUT"])
+@login_required
+def update_user(user_id):
+    data = request.get_json()
+    user = User.query.get_or_404(user_id)
+    if "name" in data:
+        user.name = data["name"]
+    if "role" in data:
+        user.role = data["role"]   # any authenticated caller can set this
+    db.session.commit()
+    return jsonify(user.to_dict())
+```
+**After (Flask):**
+```python
+@app.route("/users/<int:user_id>", methods=["PUT"])
+@login_required
+def update_user(user_id):
+    data = request.get_json()
+    if "role" in data and not g.current_user.is_admin():
+        return jsonify({"error": "Permissão de administrador necessária"}), 403
+    user = User.query.get_or_404(user_id)
+    if "name" in data:
+        user.name = data["name"]
+    if "role" in data:
+        user.role = data["role"]
+    db.session.commit()
+    return jsonify(user.to_dict())
+```
+
+**Before (Express):**
+```javascript
+router.put('/users/:id', requireAuth, async (req, res) => {
+  const user = await User.findByPk(req.params.id);
+  if (req.body.name !== undefined) user.name = req.body.name;
+  if (req.body.role !== undefined) user.role = req.body.role;   // any authenticated caller can set this
+  await user.save();
+  res.json(user);
+});
+```
+**After (Express):**
+```javascript
+router.put('/users/:id', requireAuth, async (req, res) => {
+  if (req.body.role !== undefined && !req.user.isAdmin()) {
+    return res.status(403).json({ error: 'Admin role required' });
+  }
+  const user = await User.findByPk(req.params.id);
+  if (req.body.name !== undefined) user.name = req.body.name;
+  if (req.body.role !== undefined) user.role = req.body.role;
+  await user.save();
+  res.json(user);
+});
+```
+
+This applies to any composite update endpoint with a sensitive field, not
+just `role` — audit each field the payload accepts, not just the route as
+a whole, and check ownership-based endpoints too: "the caller owns this
+record" does not imply "the caller may set every field on this record".

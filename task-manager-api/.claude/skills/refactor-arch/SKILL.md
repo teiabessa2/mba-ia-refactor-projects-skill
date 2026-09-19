@@ -96,9 +96,26 @@ finding at a time.
    and exercise the affected endpoints/functions directly (e.g. `curl` a
    changed route, import and call a changed function). A refactor that
    "should still work" but was never actually run is not done.
-5. Summarize what changed, referencing findings by ID, and flag anything
-   you deliberately left alone (e.g. a LOW finding out of scope, or a
-   finding that needs a decision only the user can make, like which secrets
+5. **Before marking any finding "FIXED" in the summary, re-check the
+   original recommendation action by action** — not just "did I touch this
+   file". Some recommendations are composite: they list two or more
+   distinct actions (e.g. "add authentication, AND add a role check before
+   allowing the `role` field to change"; "encrypt the field at rest, AND
+   stop logging it in plaintext"). A finding is "FIXED" only when **every**
+   action in the recommendation was applied and verified. If a composite
+   recommendation had only some of its actions applied, the correct status
+   is **"PARTIALLY FIXED"**, with an explicit note naming exactly which
+   action(s) are still missing — never round a partial fix up to "FIXED".
+   This applies to any finding with a compound recommendation, not just
+   authorization findings (see playbook #21 for the specific
+   field-level-authorization case this rule was written for). When in
+   doubt, re-read the finding's "Recommended fix" line from the Phase 2
+   report verbatim and check off each clause it contains before writing
+   the status.
+6. Summarize what changed, referencing findings by ID and their status
+   (FIXED or PARTIALLY FIXED, per the rule above), and flag anything you
+   deliberately left alone (e.g. a LOW finding out of scope, or a finding
+   that needs a decision only the user can make, like which secrets
    manager to adopt).
 
 ## Reference files

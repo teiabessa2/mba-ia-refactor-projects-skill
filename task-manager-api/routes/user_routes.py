@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 
 from services import user_service
 from utils.auth import login_required
@@ -27,6 +27,8 @@ def create_user():
 @login_required
 def update_user(user_id):
     data = request.get_json(silent=True)
+    if data and 'role' in data and not g.current_user.is_admin():
+        return jsonify({'error': 'Permissão de administrador necessária para alterar role'}), 403
     result = user_service.update_user(user_id, data)
     return jsonify(result), 200
 

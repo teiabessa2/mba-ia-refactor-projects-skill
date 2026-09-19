@@ -201,4 +201,33 @@ This audit found 17 findings (6 CRITICAL, 5 HIGH, 4 MEDIUM, 2 LOW). Nothing was 
 
 ## 5. Resolution
 
-The user chose: **"Fix everything, in severity order."** All 17 findings were fixed in Phase 3 — see the project's own `README.md` root ("Resultados" → Project 3) for the before/after structure, the checklist, and live validation logs. Two items from section 4 were deliberately left as-is per the "needs a decision" note: `NotificationService` remains unwired (only its hardcoded credential was fixed), and only `DELETE /tasks/<id>` was protected with auth among the task-mutating routes, matching the exact C6 scope confirmed above (not `POST`/`PUT /tasks`).
+The user chose: **"Fix everything, in severity order."** 16 of 17 findings were fixed in Phase 3 — see the project's own `README.md` root ("Resultados" → Project 3) for the before/after structure, the checklist, and live validation logs. Two items from section 4 were deliberately left as-is per the "needs a decision" note: `NotificationService` remains unwired (only its hardcoded credential was fixed), and only `DELETE /tasks/<id>` was protected with auth among the task-mutating routes, matching the exact C6 scope confirmed above (not `POST`/`PUT /tasks`).
+
+**Correction:** [C6] was originally reported as fully resolved. That was wrong. The C6 recommendation for `PUT /users/<id>` had two actions — (1) require authentication, (2) check the caller is admin before allowing the `role` field to change. Only action (1) was applied (`@login_required` on the route); the `admin_required` decorator that Phase 3 added in `utils/auth.py` was never actually called from `update_user`. Net effect: any authenticated user could still send `{"role": "admin"}` to `PUT /users/<own id>` and self-promote. Correct status for that sub-finding at the time was **PARTIALLY FIXED**, not FIXED. See section 6 for the actual fix and verification. This gap is also why `references/refactoring-playbook.md` now has pattern #21 (field-level authorization) and `SKILL.md` Phase 3 now requires checking every action of a composite recommendation before writing "FIXED".
+
+## 6. Re-audit — [C6] `PUT /users/<id>` role field (post-correction)
+
+- **File:** `routes/user_routes.py:26-32` (route), `services/user_service.py:93-132` (`update_user`)
+- **Fix applied:** the route now rejects a `role` change from a non-admin caller before calling the service layer:
+  ```python
+  @user_bp.route('/users/<int:user_id>', methods=['PUT'])
+  @login_required
+  def update_user(user_id):
+      data = request.get_json(silent=True)
+      if data and 'role' in data and not g.current_user.is_admin():
+          return jsonify({'error': 'Permissão de administrador necessária para alterar role'}), 403
+      result = user_service.update_user(user_id, data)
+      return jsonify(result), 200
+  ```
+- **Verified live** (app run with seed data — `joao@email.com` is `admin`, `maria@email.com` is `user`):
+  ```
+  $ curl -X PUT http://127.0.0.1:5000/users/2 -H "Authorization: Bearer <maria_token>" -d '{"role":"admin"}'
+  {"error":"Permissão de administrador necessária para alterar role"}   # HTTP 403 — self-promotion blocked
+
+  $ curl -X PUT http://127.0.0.1:5000/users/2 -H "Authorization: Bearer <joao_admin_token>" -d '{"role":"manager"}'
+  {"active":true,...,"role":"manager"}   # HTTP 200 — admin can still change another user's role
+
+  $ curl -X PUT http://127.0.0.1:5000/users/2 -H "Authorization: Bearer <maria_token>" -d '{"name":"Maria S. Santos"}'
+  {"active":true,...,"name":"Maria S. Santos"}   # HTTP 200 — non-sensitive self-update still works
+  ```
+- **Status: FIXED** — both actions of the original C6 recommendation for this route are now applied: authentication (Phase 3, unchanged) and an admin check specifically gating the `role` field (this correction).
